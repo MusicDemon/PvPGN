@@ -650,7 +650,6 @@ extern void channel_message_send(t_channel const * channel, t_message_type type,
 	t_message *    message_to_send;
 	t_account *    acc;
 
-
     if (!channel)
     {
 	eventlog(eventlog_level_error,__FUNCTION__,"got NULL channel");
@@ -673,19 +672,19 @@ extern void channel_message_send(t_channel const * channel, t_message_type type,
       message_send_text(me,message_type_error,me,"Your account has been muted, you can't talk on the channel.");
       return;
     }  
-			
-    if(channel_get_flags(channel) & channel_flags_moderated) // moderated channel - only admins,OPs and voices may talk
+	// UNDONE: Users may talk only the operators and representatives. - MusicDemon 16-Sep-2012
+    /*if(channel_get_flags(channel) & channel_flags_moderated) // moderated channel - only admins,OPs and voices may talk
     {
-	if (type==message_type_talk || type==message_type_emote)
-	{
-	    if (!((account_is_operator_or_admin(acc,channel_get_name(channel))) ||
-		 (channel_conn_has_tmpVOICE(channel,me)) || (account_get_auth_voice(acc,channel_get_name(channel)) == 1)))
-	    {
-		message_send_text(me,message_type_error,me,"This channel is moderated");
-	        return;
-	    }
-	}
-    }
+		if (type==message_type_talk || type==message_type_emote)
+		{
+		    if (!((account_is_operator_or_admin(acc,channel_get_name(channel))) ||
+			(channel_conn_has_tmpVOICE(channel,me)) || (account_get_auth_voice(acc,channel_get_name(channel)) == 1)))
+			{
+				message_send_text(me,message_type_error,me,"This channel is moderated");
+				return;
+			}
+		}
+    }*/
 
 	if (!channel->clienttag){
         if (!(message1 = message_create(type,me,text)))
@@ -694,18 +693,19 @@ extern void channel_message_send(t_channel const * channel, t_message_type type,
             return;
          }
 		 message2 = NULL;
-	} else {
+	} 
+	else {
         if (!(message1 = message_create(type,me,text)))
         {
             eventlog(eventlog_level_error,__FUNCTION__,"could not create message1");
             return;
-         }
+        }
         if (!(message2 = message_create(type,me,text)))
         {
             eventlog(eventlog_level_error,__FUNCTION__,"could not create message2");
 			message_destroy(message1);
             return;
-         }
+        }
 	}
 
 
@@ -713,37 +713,50 @@ extern void channel_message_send(t_channel const * channel, t_message_type type,
     tname = conn_get_chatname(me);
     for (c=channel_get_first(channel); c; c=channel_get_next())
     {
-	if (c==me && (type==message_type_talk || type==message_type_gameopt_talk))
-	    continue; /* ignore ourself */
-	if (c==me && (!conn_is_irc_variant(c)) && type==message_type_part)
-            continue; /* only on irc we need to inform ourself about leaving the channel */
-	if (c!=me && (!conn_is_irc_variant(c)) && (channel_get_flags(channel) & channel_flags_thevoid) && (type==message_type_join || type==message_type_part))
+		if (c==me && (type==message_type_talk || type==message_type_gameopt_talk))
+		    continue; /* ignore ourself */
+		if (c==me && (!conn_is_irc_variant(c)) && type==message_type_part)
+			continue; /* only on irc we need to inform ourself about leaving the channel */
+		if (c!=me && (!conn_is_irc_variant(c)) && (channel_get_flags(channel) & channel_flags_thevoid) && (type==message_type_join || type==message_type_part))
             continue; /* make sure we even get join part information about self in The Void */
-	if ((type==message_type_talk || type==message_type_whisper || type==message_type_emote || type==message_type_broadcast) &&
-	    conn_check_ignoring(c,tname)==1)
-	    continue; /* ignore squelched players */
+		if ((type==message_type_talk || type==message_type_whisper || type==message_type_emote || type==message_type_broadcast) &&
+		    conn_check_ignoring(c,tname)==1)
+			continue; /* ignore squelched players */
 
-	if (!channel->clienttag || channel->clienttag==conn_get_clienttag(c)) {
-		message_to_send = message1;
-	} else {
-		message_to_send = message2;
+		if (!channel->clienttag || channel->clienttag==conn_get_clienttag(c)) {
+			message_to_send = message1;
+		} else {
+			message_to_send = message2;
+		}
+		// Note: Let only hear operators or representatives what users have to say.
+		if (channel_get_flags(channel) & channel_flags_moderated)
+		{
+			if (type==message_type_talk || type==message_type_emote)
+			{
+				if (((account_is_operator_or_admin(acc,channel_get_name(channel))) || (channel_conn_has_tmpVOICE(channel,me)) || (account_get_auth_voice(acc,channel_get_name(channel)) == 1)) ||
+					((account_is_operator_or_admin(conn_get_account(c),channel_get_name(channel))) || (channel_conn_has_tmpVOICE(channel,c)) || (account_get_auth_voice(conn_get_account(c),channel_get_name(channel)) == 1)))
+				{
+					if (message_send(message_to_send,c)==0 && c!=me)
+					heard = 1;
+				}
+			}
+		}
+		else
+			if (message_send(message_to_send,c)==0 && c!=me)
+				heard = 1;
 	}
 
-	if (message_send(message_to_send,c)==0 && c!=me)
-	    heard = 1;
-	}
-
-    conn_unget_chatname(me,tname);
-
-    message_destroy(message1);
+	conn_unget_chatname(me,tname);
+	
+	message_destroy(message1);
 	if (message2)
 		message_destroy(message2);
-
-    if ((conn_get_wol(me) == 0))
-    {
-        if (!heard && (type==message_type_talk || type==message_type_emote))
-	    message_send_text(me,message_type_info,me,"No one hears you.");
-    }
+	
+	if ((conn_get_wol(me) == 0))
+	{
+		if (!heard && (type==message_type_talk || type==message_type_emote))
+		message_send_text(me,message_type_info,me,"No one hears you.");
+	}
 }
 
 extern int channel_ban_user(t_channel * channel, char const * user)
@@ -1575,12 +1588,12 @@ extern int channel_set_userflags(t_connection * c)
      so we first have to check if user is in a channel at all */
   if ((!conn_get_channel(c)) || (!(channel = channel_get_name(conn_get_channel(c)))))
     return -1;
-
+  // newflags values for BLIZZARD and BNET were switched. - MusicDemon 16-sep-2012
   if (account_get_auth_admin(acc,channel) == 1 || account_get_auth_admin(acc,NULL) == 1)
-    newflags = MF_BLIZZARD;
+    newflags = MF_BNET;
   else if (account_get_auth_operator(acc,channel) == 1 ||
 	   account_get_auth_operator(acc,NULL) == 1)
-    newflags = MF_BNET;
+    newflags = MF_BLIZZARD;
   else if (channel_conn_is_tmpOP(conn_get_channel(c),c))
     newflags = MF_GAVEL;
   else if ((account_get_auth_voice(acc,channel) == 1) ||
